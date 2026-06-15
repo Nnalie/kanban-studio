@@ -1,0 +1,57 @@
+{
+  "tables": {
+    "users": {
+      "description": "One row per user. Supports future multi-user expansion.",
+      "columns": {
+        "id":       { "type": "INTEGER", "constraints": ["PRIMARY KEY", "AUTOINCREMENT"] },
+        "username": { "type": "TEXT",    "constraints": ["NOT NULL", "UNIQUE"] }
+      }
+    },
+    "boards": {
+      "description": "One board per user for MVP. id kept for future multi-board support.",
+      "columns": {
+        "id":      { "type": "INTEGER", "constraints": ["PRIMARY KEY", "AUTOINCREMENT"] },
+        "user_id": { "type": "INTEGER", "constraints": ["NOT NULL", "REFERENCES users(id)"] }
+      }
+    },
+    "columns": {
+      "description": "Five fixed rows per board. id matches the frontend stable column IDs.",
+      "columns": {
+        "id":       { "type": "TEXT",    "constraints": ["PRIMARY KEY"] },
+        "board_id": { "type": "INTEGER", "constraints": ["NOT NULL", "REFERENCES boards(id)"] },
+        "title":    { "type": "TEXT",    "constraints": ["NOT NULL"] },
+        "position": { "type": "INTEGER", "constraints": ["NOT NULL"] }
+      }
+    },
+    "cards": {
+      "description": "One row per card. id matches the frontend-generated card IDs.",
+      "columns": {
+        "id":        { "type": "TEXT",    "constraints": ["PRIMARY KEY"] },
+        "column_id": { "type": "TEXT",    "constraints": ["NOT NULL", "REFERENCES columns(id)"] },
+        "title":     { "type": "TEXT",    "constraints": ["NOT NULL"] },
+        "details":   { "type": "TEXT",    "constraints": ["NOT NULL", "DEFAULT ''"] },
+        "position":  { "type": "INTEGER", "constraints": ["NOT NULL"] }
+      }
+    },
+    "chat_messages": {
+      "description": "Conversation history per user, used as context for AI calls.",
+      "columns": {
+        "id":         { "type": "INTEGER", "constraints": ["PRIMARY KEY", "AUTOINCREMENT"] },
+        "user_id":    { "type": "INTEGER", "constraints": ["NOT NULL", "REFERENCES users(id)"] },
+        "role":       { "type": "TEXT",    "constraints": ["NOT NULL"] },
+        "content":    { "type": "TEXT",    "constraints": ["NOT NULL"] },
+        "created_at": { "type": "TEXT",    "constraints": ["NOT NULL"] }
+      }
+    }
+  },
+  "default_columns": [
+    { "id": "col-backlog",   "title": "Backlog",     "position": 0 },
+    { "id": "col-discovery", "title": "Discovery",   "position": 1 },
+    { "id": "col-progress",  "title": "In Progress", "position": 2 },
+    { "id": "col-review",    "title": "Review",      "position": 3 },
+    { "id": "col-done",      "title": "Done",        "position": 4 }
+  ],
+  "seed_user": {
+    "username": "user"
+  }
+}
