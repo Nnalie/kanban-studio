@@ -7,12 +7,13 @@ export async function getBoard(): Promise<BoardData> {
 }
 
 export async function putBoard(board: BoardData): Promise<void> {
-  await fetch("/api/board", {
+  const res = await fetch("/api/board", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(board),
     credentials: "include",
   });
+  if (!res.ok) throw new Error(`PUT /api/board ${res.status}`);
 }
 
 export async function sendChatMessage(

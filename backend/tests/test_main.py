@@ -226,6 +226,21 @@ def test_put_board_wrong_column_count_returns_400(authed: TestClient) -> None:
     assert authed.put("/api/board", json=bad).status_code == 400
 
 
+def test_put_board_orphan_card_id_returns_400(authed: TestClient) -> None:
+    # A column references a card id that is absent from the cards map.
+    orphan = {
+        "columns": [
+            {"id": "col-backlog",   "title": "Backlog",     "cardIds": ["ghost"]},
+            {"id": "col-discovery", "title": "Discovery",   "cardIds": []},
+            {"id": "col-progress",  "title": "In Progress", "cardIds": []},
+            {"id": "col-review",    "title": "Review",      "cardIds": []},
+            {"id": "col-done",      "title": "Done",        "cardIds": []},
+        ],
+        "cards": {},
+    }
+    assert authed.put("/api/board", json=orphan).status_code == 400
+
+
 # --- AI test endpoint tests ---
 
 def test_ai_test_requires_auth(client: TestClient) -> None:
@@ -319,6 +334,24 @@ def test_ai_chat_invalid_board_update_rejected(authed: TestClient) -> None:
     payload = {"message": "Bad update", "boardUpdate": bad_board}
     with _mock_ai(payload):
         response = authed.post("/api/ai/chat", json={"message": "Do something bad"})
+    assert response.status_code == 400
+
+
+def test_ai_chat_orphan_card_id_rejected(authed: TestClient) -> None:
+    # AI returns a board whose column references a card missing from cards.
+    orphan_board = {
+        "columns": [
+            {"id": "col-backlog",   "title": "Backlog",     "cardIds": ["ghost"]},
+            {"id": "col-discovery", "title": "Discovery",   "cardIds": []},
+            {"id": "col-progress",  "title": "In Progress", "cardIds": []},
+            {"id": "col-review",    "title": "Review",      "cardIds": []},
+            {"id": "col-done",      "title": "Done",        "cardIds": []},
+        ],
+        "cards": {},
+    }
+    payload = {"message": "Oops", "boardUpdate": orphan_board}
+    with _mock_ai(payload):
+        response = authed.post("/api/ai/chat", json={"message": "Add a card"})
     assert response.status_code == 400
 
 

@@ -45,6 +45,15 @@ describe("KanbanBoard", () => {
     expect(input).toHaveValue("New Name");
   });
 
+  it("shows an error when the board fails to load", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({ ok: false, status: 500 })
+    );
+    render(<KanbanBoard />);
+    expect(await screen.findByText(/could not load your board/i)).toBeInTheDocument();
+  });
+
   it("adds and removes a card", async () => {
     render(<KanbanBoard />);
     const columns = await screen.findAllByTestId(/column-/i);

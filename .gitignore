@@ -178,3 +178,6 @@ backend/static/*
 !backend/static/.gitkeep
 frontend/out
 
+
+# Local SQLite database
+*.db

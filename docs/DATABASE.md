@@ -29,28 +29,29 @@ One board per user for MVP. The extra table keeps future multi-board expansion c
 
 ### columns
 
-Five fixed rows per board. The `id` column holds the frontend stable IDs (`col-backlog`, `col-discovery`, `col-progress`, `col-review`, `col-done`), so no translation is needed between the API and the frontend.
+Five fixed rows per board. The `id` column holds the frontend stable IDs (`col-backlog`, `col-discovery`, `col-progress`, `col-review`, `col-done`), so no translation is needed between the API and the frontend. The primary key is composite `(board_id, id)`, so the same fixed column IDs can repeat across different boards (multi-user safe).
 
-| Column   | Type    | Notes               |
-|----------|---------|---------------------|
-| id       | TEXT    | PK, e.g. col-backlog|
-| board_id | INTEGER | FK → boards(id)     |
-| title    | TEXT    | user-editable       |
-| position | INTEGER | 0–4, fixed order    |
+| Column   | Type    | Notes                      |
+|----------|---------|----------------------------|
+| board_id | INTEGER | FK → boards(id), PK part   |
+| id       | TEXT    | PK part, e.g. col-backlog  |
+| title    | TEXT    | user-editable              |
+| position | INTEGER | 0–4, fixed order           |
 
 Column IDs are fixed. Only `title` changes.
 
 ### cards
 
-One row per card. The `id` column holds the frontend-generated IDs (e.g. `card-abc123`), matching the `createId` function output.
+One row per card. The `id` column holds the frontend-generated IDs (e.g. `card-abc123`), matching the `createId` function output. The primary key is composite `(board_id, id)` and the card references its column via the composite foreign key `(board_id, column_id) → columns(board_id, id)`, so card IDs are scoped per board rather than globally unique.
 
-| Column    | Type    | Notes                    |
-|-----------|---------|--------------------------|
-| id        | TEXT    | PK, frontend-generated   |
-| column_id | TEXT    | FK → columns(id)         |
-| title     | TEXT    | not null                 |
-| details   | TEXT    | not null, default ''     |
-| position  | INTEGER | order within the column  |
+| Column    | Type    | Notes                                  |
+|-----------|---------|----------------------------------------|
+| board_id  | INTEGER | PK part; FK part → columns(board_id,id)|
+| id        | TEXT    | PK part, frontend-generated            |
+| column_id | TEXT    | FK part → columns(board_id, id)        |
+| title     | TEXT    | not null                               |
+| details   | TEXT    | not null, default ''                   |
+| position  | INTEGER | order within the column                |
 
 ### chat_messages
 

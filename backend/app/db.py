@@ -19,10 +19,21 @@ DEFAULT_COLUMNS: list[dict] = [
 ]
 
 
-def get_db() -> Generator[sqlite3.Connection, None, None]:
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+# Cap how much chat history is replayed to the model on each call so token
+# usage and latency stay bounded over a long-lived session.
+MAX_HISTORY_MESSAGES = 20
+
+
+def _configure(conn: sqlite3.Connection) -> None:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA busy_timeout = 5000")
+
+
+def get_db() -> Generator[sqlite3.Connection, None, None]:
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    _configure(conn)
     try:
         yield conn
         conn.commit()
@@ -35,7 +46,7 @@ def get_db() -> Generator[sqlite3.Connection, None, None]:
 
 def init_db() -> None:
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.execute("PRAGMA foreign_keys = ON")
+    _configure(conn)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -48,21 +59,27 @@ def init_db() -> None:
             user_id INTEGER NOT NULL REFERENCES users(id)
         )
     """)
+    # Column and card IDs are scoped to a board: the same fixed column IDs
+    # (col-backlog, ...) and any reused card IDs can coexist across boards.
     conn.execute("""
         CREATE TABLE IF NOT EXISTS columns (
-            id       TEXT    PRIMARY KEY,
             board_id INTEGER NOT NULL REFERENCES boards(id),
+            id       TEXT    NOT NULL,
             title    TEXT    NOT NULL,
-            position INTEGER NOT NULL
+            position INTEGER NOT NULL,
+            PRIMARY KEY (board_id, id)
         )
     """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS cards (
-            id        TEXT    PRIMARY KEY,
-            column_id TEXT    NOT NULL REFERENCES columns(id),
+            board_id  INTEGER NOT NULL,
+            id        TEXT    NOT NULL,
+            column_id TEXT    NOT NULL,
             title     TEXT    NOT NULL,
             details   TEXT    NOT NULL DEFAULT '',
-            position  INTEGER NOT NULL
+            position  INTEGER NOT NULL,
+            PRIMARY KEY (board_id, id),
+            FOREIGN KEY (board_id, column_id) REFERENCES columns(board_id, id)
         )
     """)
     conn.execute("""
@@ -105,8 +122,9 @@ def read_board(board_id: int, conn: sqlite3.Connection) -> dict:
     cards: dict[str, dict] = {}
     for col in cols:
         col_cards = conn.execute(
-            "SELECT id, title, details FROM cards WHERE column_id = ? ORDER BY position",
-            (col["id"],),
+            "SELECT id, title, details FROM cards"
+            " WHERE board_id = ? AND column_id = ? ORDER BY position",
+            (board_id, col["id"]),
         ).fetchall()
         card_ids = []
         for card in col_cards:
@@ -123,10 +141,11 @@ def read_board(board_id: int, conn: sqlite3.Connection) -> dict:
 
 def get_chat_history(user_id: int, conn: sqlite3.Connection) -> list[dict]:
     rows = conn.execute(
-        "SELECT role, content FROM chat_messages WHERE user_id = ? ORDER BY id",
-        (user_id,),
+        "SELECT role, content FROM chat_messages WHERE user_id = ?"
+        " ORDER BY id DESC LIMIT ?",
+        (user_id, MAX_HISTORY_MESSAGES),
     ).fetchall()
-    return [{"role": r["role"], "content": r["content"]} for r in rows]
+    return [{"role": r["role"], "content": r["content"]} for r in reversed(rows)]
 
 
 def append_chat_message(user_id: int, role: str, content: str, conn: sqlite3.Connection) -> None:
@@ -158,19 +177,19 @@ def write_board(board_id: int, board_data: dict, conn: sqlite3.Connection) -> No
     current_ids = {
         row["id"]
         for row in conn.execute(
-            "SELECT cards.id FROM cards"
-            " JOIN columns ON cards.column_id = columns.id"
-            " WHERE columns.board_id = ?",
-            (board_id,),
+            "SELECT id FROM cards WHERE board_id = ?", (board_id,)
         )
     }
 
     for card_id in current_ids - set(incoming):
-        conn.execute("DELETE FROM cards WHERE id = ?", (card_id,))
+        conn.execute(
+            "DELETE FROM cards WHERE board_id = ? AND id = ?", (board_id, card_id)
+        )
 
     for c in incoming.values():
         conn.execute(
-            "INSERT OR REPLACE INTO cards (id, column_id, title, details, position)"
-            " VALUES (?, ?, ?, ?, ?)",
-            (c["id"], c["column_id"], c["title"], c["details"], c["position"]),
+            "INSERT OR REPLACE INTO cards"
+            " (board_id, id, column_id, title, details, position)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (board_id, c["id"], c["column_id"], c["title"], c["details"], c["position"]),
         )

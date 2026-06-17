@@ -50,6 +50,13 @@ test.describe("board (authenticated)", () => {
     if (useIntegrated) {
       await page.goto("/");
       await loginViaModal(page);
+      // Seed a known card so the drag test has a deterministic target
+      // (the real backend serves a blank board to a fresh user).
+      await page.request.put("/api/board", { data: DEV_MOCK_BOARD });
+      await page.reload();
+      await expect(
+        page.getByRole("heading", { name: "Kanban Studio" })
+      ).toBeVisible();
     } else {
       await mockDevMode(page);
     }

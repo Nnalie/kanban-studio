@@ -78,6 +78,40 @@ def get_user_id(username: str, conn) -> int:
     return row["id"]
 
 
+def build_validated_board(columns: list[dict], cards: dict[str, dict]) -> dict:
+    """Validate a board payload and return a normalized board dict.
+
+    Raises HTTPException(400) if the columns are not exactly the five fixed
+    IDs, or if a column references a card id that is absent from ``cards`` or
+    referenced by more than one column. Returning a clean dict keeps the
+    persistence layer free of unhandled KeyErrors.
+    """
+    if len(columns) != 5 or {col["id"] for col in columns} != COLUMN_IDS:
+        raise HTTPException(status_code=400, detail="Invalid column IDs")
+
+    referenced = [cid for col in columns for cid in col.get("cardIds", [])]
+    if len(referenced) != len(set(referenced)):
+        raise HTTPException(status_code=400, detail="A card is referenced by more than one column")
+    missing = [cid for cid in referenced if cid not in cards]
+    if missing:
+        raise HTTPException(status_code=400, detail=f"Unknown card id(s): {', '.join(missing)}")
+
+    return {
+        "columns": [
+            {"id": col["id"], "title": col["title"], "cardIds": list(col.get("cardIds", []))}
+            for col in columns
+        ],
+        "cards": {
+            cid: {
+                "id": cid,
+                "title": cards[cid]["title"],
+                "details": cards[cid].get("details", ""),
+            }
+            for cid in referenced
+        },
+    }
+
+
 # --- Routes ---
 
 @app.get("/api/health")
@@ -126,20 +160,17 @@ def put_board(
     current_user: str = Depends(get_current_user),
     conn=Depends(get_db),
 ) -> None:
-    if len(body.columns) != 5 or {col.id for col in body.columns} != COLUMN_IDS:
-        raise HTTPException(status_code=400, detail="Invalid column IDs")
+    columns = [
+        {"id": col.id, "title": col.title, "cardIds": col.cardIds}
+        for col in body.columns
+    ]
+    cards = {
+        k: {"id": v.id, "title": v.title, "details": v.details}
+        for k, v in body.cards.items()
+    }
+    board_dict = build_validated_board(columns, cards)
     user_id = get_user_id(current_user, conn)
     board_id = get_or_create_board(user_id, conn)
-    board_dict = {
-        "columns": [
-            {"id": col.id, "title": col.title, "cardIds": col.cardIds}
-            for col in body.columns
-        ],
-        "cards": {
-            k: {"id": v.id, "title": v.title, "details": v.details}
-            for k, v in body.cards.items()
-        },
-    }
     write_board(board_id, board_dict, conn)
 
 
@@ -185,20 +216,9 @@ async def ai_chat(
 
     if board_update is not None:
         try:
-            columns = board_update["columns"]
-            cards = board_update.get("cards", {})
-            if len(columns) != 5 or {col["id"] for col in columns} != COLUMN_IDS:
-                raise HTTPException(status_code=400, detail="AI returned invalid board update")
-            board_dict = {
-                "columns": [
-                    {"id": col["id"], "title": col["title"], "cardIds": col.get("cardIds", [])}
-                    for col in columns
-                ],
-                "cards": {
-                    k: {"id": v["id"], "title": v["title"], "details": v.get("details", "")}
-                    for k, v in cards.items()
-                },
-            }
+            board_dict = build_validated_board(
+                board_update["columns"], board_update.get("cards", {})
+            )
         except (KeyError, TypeError):
             raise HTTPException(status_code=400, detail="AI returned invalid board update")
         write_board(board_id, board_dict, conn)

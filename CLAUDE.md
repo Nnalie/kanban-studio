@@ -1,53 +1,85 @@
-# Project Management MVP web app
+# CLAUDE.md
 
-## Business Requirements
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-This project is building a Project Management App. Key features:
-- A user can sign in
-- When signed in, the user sees a Kanban board representing their project
-- The Kanban board has fixed columns that can be renamed
-- The cards on the Kanban board can be moved with drag and drop, and edited
-- There is an AI chat feature in a sidebar; the AI is able to create / edit / move one or more cards
+## What this is
 
-## Limitations
+Kanban board with AI chat assistant. Next.js static frontend served by FastAPI at `/`; everything packaged in a single Docker container on port 8000. SQLite database. AI via OpenRouter.
 
-For the MVP, there will only be a user sign in (hardcoded to 'user' and 'password') but the database will support multiple users for future.
+## Commands
 
-For the MVP, there will only be 1 Kanban board per signed in user.
+### Run the app (Docker)
 
-For the MVP, this will run locally (in a docker container)
+```bash
+./scripts/start.sh   # builds and starts container on port 8000
+./scripts/stop.sh
+```
 
-## Technical Decisions
+### Backend (from `backend/`)
 
-- NextJS frontend
-- Python FastAPI backend, including serving the static NextJS site at /
-- Everything packaged into a Docker container
-- Use "uv" as the package manager for python in the Docker container
-- Use OpenRouter for the AI calls. An OPENROUTER_API_KEY is in .env in the project root
-- Use `openai/gpt-oss-120b` as the model
-- Use SQLLite local database for the database, creating a new db if it doesn't exist
-- Start and Stop server scripts for Mac, PC, Linux in scripts/
+```bash
+uv sync
+uv run uvicorn app.main:app --reload --port 8000   # local dev, no Docker
+uv run pytest                                       # all tests
+uv run pytest tests/test_main.py::test_health      # single test
+```
 
-## Starting Point
+### Frontend (from `frontend/`)
 
-A working MVP of the frontend has been built and is already in frontend. This is not yet designed for the Docker setup. It's a pure frontend-only demo.
+```bash
+npm install
+npm run dev              # standalone dev server on port 3000
+npm run lint
+npm run test:unit        # Vitest
+npm run test:e2e         # Playwright against port 3000
+npm run test:e2e:integrated  # builds static export, runs Playwright against FastAPI on port 8000
+```
 
-## Color Scheme
+## Architecture
 
-- Accent Yellow: `#ecad0a` - accent lines, highlights
-- Blue Primary: `#209dd7` - links, key sections
-- Purple Secondary: `#753991` - submit buttons, important actions
-- Dark Navy: `#032147` - main headings
-- Gray Text: `#888888` - supporting text, labels
+### Request flow
+
+Browser → FastAPI (port 8000) → `/api/*` routes handled in Python → SQLite  
+Static frontend assets are served by FastAPI's `StaticFiles` mount at `/`. API routes are registered before the static mount so `/api/*` is never caught by the file server.
+
+### Frontend build
+
+Next.js uses `output: 'export'` — produces a static site in `frontend/out/`. The Dockerfile copies `out/` into `backend/static/`, which FastAPI serves. There is no Next.js server at runtime.
+
+### Data model
+
+```
+BoardData = { columns: Column[], cards: Record<string, Card> }
+Column    = { id, title, cardIds: string[] }
+Card      = { id, title, details }
+```
+
+Five fixed column IDs: `col-backlog`, `col-discovery`, `col-progress`, `col-review`, `col-done`. Column count and IDs are enforced on every `PUT /api/board` and on AI board updates.
+
+### Auth
+
+Server-side sessions stored in an in-process dict (`sessions: dict[str, str]`). HTTP-only `session_id` cookie. Hardcoded credentials: `user` / `password`. Sessions are lost on container restart.
+
+### AI
+
+`app/ai.py` exports `get_ai_client()` (AsyncOpenAI pointed at OpenRouter) and `MODEL` (`openai/gpt-oss-120b:free`). The chat endpoint (`POST /api/ai/chat`) sends current board state and per-user conversation history, and expects structured JSON back:
+
+```json
+{ "message": "string", "boardUpdate": BoardData | null }
+```
+
+If `boardUpdate` is present and valid, it replaces the board in the database. Chat history is stored in the `chat_messages` SQLite table.
+
+### Database
+
+SQLite, initialized at startup via `init_db()`. Tables: `users`, `boards`, `columns`, `cards`, `chat_messages`. See `docs/DATABASE.md` for schema details and `docs/schema.json` for the JSON schema.
+
+### Environment
+
+`OPENROUTER_API_KEY` must be set. In Docker it is loaded from the project root `.env`. Locally, export it before running uvicorn.
 
 ## Coding standards
 
-1. Use latest versions of libraries and idiomatic approaches as of today
-2. Keep it simple - NEVER over-engineer, ALWAYS simplify, NO unnecessary defensive programming. No extra features - focus on simplicity.
-3. Be concise. Keep README minimal. IMPORTANT: no emojis ever
-4. When hitting issues, always identify root cause before trying a fix. Do not guess. Prove with evidence, then fix the root cause.
-
-## Working documentation
-
-All documents for planning and executing this project will be in the docs/ directory.
-Please review the docs/PLAN.md document before proceeding.
+- No over-engineering. No unnecessary defensive programming.
+- No emojis anywhere.
+- Identify root cause before fixing — prove with evidence, then fix.

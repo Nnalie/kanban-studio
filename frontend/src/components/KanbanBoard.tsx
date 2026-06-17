@@ -23,22 +23,37 @@ interface Props {
 
 export const KanbanBoard = ({ onLogout }: Props) => {
   const [board, setBoard] = useState<BoardData | null>(null);
+  const [loadError, setLoadError] = useState(false);
+  const [saveError, setSaveError] = useState(false);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
   const saveTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    getBoard().then(setBoard).catch(() => {});
+    getBoard().then(setBoard).catch(() => setLoadError(true));
     return () => {
       if (saveTimeout.current) clearTimeout(saveTimeout.current);
     };
   }, []);
 
-  const saveBoard = useCallback((next: BoardData) => {
-    if (saveTimeout.current) clearTimeout(saveTimeout.current);
-    saveTimeout.current = setTimeout(() => {
-      putBoard(next).catch(() => {});
-    }, 400);
-  }, []);
+  const saveBoard = useCallback(
+    (next: BoardData) => {
+      if (saveTimeout.current) clearTimeout(saveTimeout.current);
+      saveTimeout.current = setTimeout(() => {
+        putBoard(next)
+          .then(() => setSaveError(false))
+          .catch((err: Error) => {
+            // A lost session surfaces as 401; send the user back to login
+            // rather than silently dropping their edits.
+            if (err.message.includes("401")) {
+              onLogout?.();
+            } else {
+              setSaveError(true);
+            }
+          });
+      }, 400);
+    },
+    [onLogout]
+  );
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -98,6 +113,7 @@ export const KanbanBoard = ({ onLogout }: Props) => {
   const handleDeleteCard = (columnId: string, cardId: string) => {
     if (!board) return;
     const next = {
+      ...board,
       cards: Object.fromEntries(
         Object.entries(board.cards).filter(([id]) => id !== cardId)
       ),
@@ -112,9 +128,23 @@ export const KanbanBoard = ({ onLogout }: Props) => {
   };
 
   const handleBoardUpdate = useCallback((newBoard: BoardData) => {
+    // The AI board update was already persisted server-side. Cancel any
+    // pending (now-stale) debounced save so it can't clobber the AI's write,
+    // then mirror the authoritative board locally.
     if (saveTimeout.current) clearTimeout(saveTimeout.current);
+    setSaveError(false);
     setBoard(newBoard);
   }, []);
+
+  if (loadError) {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <p className="text-sm text-red-500">
+          Could not load your board. Please refresh to try again.
+        </p>
+      </div>
+    );
+  }
 
   if (!board) {
     return (
@@ -166,6 +196,11 @@ export const KanbanBoard = ({ onLogout }: Props) => {
               )}
             </div>
           </div>
+          {saveError && (
+            <p className="text-sm text-red-500" role="alert">
+              Changes could not be saved. Check your connection and try again.
+            </p>
+          )}
           <div className="flex flex-wrap items-center gap-4">
             {board.columns.map((column) => (
               <div
